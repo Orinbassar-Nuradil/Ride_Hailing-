@@ -2,22 +2,29 @@
 
 ## Scope
 
-This assignment adds interchangeable pricing algorithms and driver
-matching algorithms to the Ride-Hailing domain.
+This assignment implements interchangeable pricing algorithms and driver
+matching algorithms in the Ride-Hailing domain.
 
 Run `com.ridehail.app.StrategyDemo` for the Assignment 5 demonstration.
-The existing booking application remains the Assignment 4 workflow.
+The existing booking application belongs to Assignment 4.
 
 ## Running
 
-Requirements: JDK 17 or newer; Maven dependencies loaded.
+Requirements:
+- JDK 17 or newer.
+- Maven dependencies loaded.
 
-In IntelliJ, open the Maven project containing `pom.xml`.
-Run the `main` method in `StrategyDemo`.
+In IntelliJ IDEA:
 
-Run all tests through Maven → Lifecycle → test.
+1. Open the Maven project inside the `Ride_Hailing` directory.
+2. Wait for Maven dependencies to load.
+3. Open `src/main/java/com/ridehail/app/StrategyDemo.java`.
+4. Run its `main` method.
 
-With Maven installed, from the directory containing `pom.xml`:
+To run all tests, use **Maven → Lifecycle → test**.
+
+With Maven installed, run this command from the directory containing
+`pom.xml`:
 
 ```bash
 mvn test
@@ -25,8 +32,9 @@ mvn test
 
 ## Classes and responsibilities
 
-The following table covers Assignment 5 additions.
-Each responsibility describes one purpose.
+This table describes the classes and interfaces used for Assignment 5.
+Each responsibility contains fewer than 25 words and avoids the prohibited
+conjunctions.
 
 | Class or interface | Responsibility |
 |---|---|
@@ -35,7 +43,7 @@ Each responsibility describes one purpose.
 | TrafficPricingStrategy | Calculates a fare using total traffic delay. |
 | AirportPricingStrategy | Calculates an airport package fare with excess-distance charges. |
 | PricingContext | Delegates fare calculation to its replaceable strategy. |
-| PricingSelector | Selects a pricing strategy from a requested mode or current trip conditions. |
+| PricingSelector | Chooses a pricing strategy using selection policy. |
 | PricingCalculator | Preserves the original calculation entry point during refactoring. |
 | TrafficSource | Defines access to additional traffic delay estimates. |
 | SimulatedTrafficSource | Supplies a configured additional delay estimate. |
@@ -45,7 +53,7 @@ Each responsibility describes one purpose.
 | HighestRatedDriverStrategy | Selects the available driver with the highest rating. |
 | LongestIdleDriverStrategy | Selects the available driver with the longest idle time. |
 | DriverMatchingContext | Delegates driver selection to its replaceable strategy. |
-| DriverMatchingSelector | Selects a matching strategy from a requested mode or customer conditions. |
+| DriverMatchingSelector | Chooses a matching strategy using selection policy. |
 | StrategyDemo | Demonstrates interchangeable algorithms through console output. |
 | PricingCalculatorTest | Verifies pricing behavior preserved across refactoring. |
 | PricingSelectorTest | Verifies pricing selection rules. |
@@ -53,31 +61,126 @@ Each responsibility describes one purpose.
 | TrafficPricingStrategyTest | Verifies traffic pricing using controlled data sources. |
 | DriverMatchingTest | Verifies driver matching behavior across interchangeable strategies. |
 
-## Algorithms and selection rules
+## Strategy family 1: Pricing
 
-Pricing:
-- Standard: 500 + 180 × distanceKm.
-- Traffic: 500 + 180 × distanceKm + 50 × totalDelay.
-- Airport: 3000 + 200 × max(0, distanceKm - 15).
+The `PricingStrategy` interface defines:
 
-Total delay combines the supplied delay with additional delay from
-TrafficSource. The default source supplies zero additional minutes.
+```java
+long calculate(int distanceKm, int delayMinutes);
+```
 
-Automatic pricing selection prioritizes airport trips.
-Other trips with at least 10 minutes of supplied delay use traffic pricing.
-Remaining trips use standard pricing.
+Three implementations provide different calculation rules:
 
-Driver matching:
-- Nearest minimizes pickup distance.
-- Highest-rated maximizes rating.
-- Longest-idle maximizes idle minutes.
+| Strategy | Calculation |
+|---|---|
+| StandardPricingStrategy | `500 + 180 × distanceKm` |
+| TrafficPricingStrategy | `500 + 180 × distanceKm + 50 × totalDelay` |
+| AirportPricingStrategy | `3000 + 200 × max(0, distanceKm - 15)` |
 
-Unavailable drivers are excluded. Equal scores are resolved by driver ID.
-No available candidate produces Optional.empty().
+The airport strategy includes the first 15 kilometres in a fixed package.
+The traffic strategy includes a charge based on total delay.
 
-Automatic matching selection prioritizes premium customers using rating.
-Other customers under high demand use nearest-driver matching.
-Remaining customers use longest-idle matching.
+`totalDelay` combines the supplied delay with additional delay obtained
+from `TrafficSource`. The default source supplies zero additional minutes.
+
+Calculations use `long` arithmetic to support large monetary results.
+Invalid trip inputs are rejected.
+
+### Pricing context
+
+`PricingContext` receives a strategy through its constructor.
+Its `setStrategy()` method replaces the strategy at runtime.
+Its `calculate()` method delegates directly to the selected strategy.
+
+The context contains no strategy-type checks.
+
+### Pricing selection
+
+Manual modes:
+
+- `STANDARD`
+- `TRAFFIC`
+- `AIRPORT`
+
+Automatic selection rules, in priority order:
+
+1. An airport trip uses `AirportPricingStrategy`.
+2. A non-airport trip with at least 10 minutes of supplied delay uses
+   `TrafficPricingStrategy`.
+3. Remaining trips use `StandardPricingStrategy`.
+
+Missing manual modes, unknown manual modes and negative supplied delays
+are rejected.
+
+## Strategy family 2: Driver matching
+
+The `DriverMatchingStrategy` interface defines:
+
+```java
+Optional<DriverCandidate> choose(List<DriverCandidate> candidates);
+```
+
+Three implementations use different selection criteria:
+
+| Strategy | Selection criterion |
+|---|---|
+| NearestDriverStrategy | Minimum pickup distance |
+| HighestRatedDriverStrategy | Maximum driver rating |
+| LongestIdleDriverStrategy | Maximum idle time |
+
+All strategies exclude unavailable drivers.
+Equal scores are resolved by driver ID.
+An empty list or a list without available drivers produces
+`Optional.empty()`.
+
+`DriverCandidate` stores the driver ID, pickup distance, rating,
+idle time and availability.
+
+### Matching context
+
+`DriverMatchingContext` receives a strategy through its constructor.
+Its `setStrategy()` method replaces the strategy at runtime.
+Its `choose()` method delegates selection to the strategy.
+
+The context contains no strategy-type checks.
+
+### Matching selection
+
+Manual modes:
+
+- `NEAREST`
+- `HIGHEST_RATED`
+- `LONGEST_IDLE`
+
+Automatic selection rules, in priority order:
+
+1. A premium customer uses `HighestRatedDriverStrategy`.
+2. A non-premium customer under high demand uses
+   `NearestDriverStrategy`.
+3. Remaining customers use `LongestIdleDriverStrategy`.
+
+Missing or unknown manual modes are rejected.
+
+## Isolation from external data changes
+
+`TrafficPricingStrategy` depends on the `TrafficSource` interface.
+
+`SimulatedTrafficSource` provides a configured additional delay.
+A different implementation can supply data from another source without
+changing the pricing formula.
+
+Constructor injection supplies the required source:
+
+```java
+PricingStrategy strategy =
+        new TrafficPricingStrategy(new SimulatedTrafficSource(5));
+```
+
+Tests inject fixed fake implementations of `TrafficSource`.
+This keeps test results independent of network access or live traffic.
+
+Tests also verify rejection of a null source and negative additional
+delay values.
 
 ## Why Strategy, not State or Template Method?
 
@@ -87,8 +190,8 @@ Matching strategies select an available driver. Each context depends on
 a small interface rather than a particular implementation.
 
 The caller supplies a strategy through the context constructor.
-The caller can later replace it through setStrategy() while retaining
-the same context object. StrategyDemo demonstrates this behavior using
+The caller can later replace it through `setStrategy()` while retaining
+the same context object. `StrategyDemo` demonstrates this behavior using
 unchanged trip inputs and unchanged driver candidates. Contexts delegate
 execution without inspecting concrete strategy types.
 
@@ -110,50 +213,118 @@ without modifying the context or existing algorithms. Registering a new
 manual mode or changing automatic selection policy requires a deliberate
 selector update. Selection policy is isolated from algorithm execution.
 
-TrafficPricingStrategy also depends on TrafficSource. Another data source
-can replace the simulated source through constructor injection without
-changing the fare formula. Tests supply fixed fake sources to keep
-results independent of live services.
+`TrafficPricingStrategy` also depends on `TrafficSource`. Another data
+source can replace the simulated source through constructor injection
+without changing the fare formula. Tests supply fixed fake sources to
+keep results independent of live services.
 
 ## Refactoring history
+
+The pricing family was first implemented in a single class containing
+a switch over the requested pricing mode.
+
+It was then refactored into separate strategy implementations with
+delegation through `PricingContext`.
 
 - [Before: pricing variants implemented using switch](https://github.com/Orinbassar-Nuradil/Ride_Hailing-/commit/15ae622)
 - [After: pricing algorithms refactored to Strategy](https://github.com/Orinbassar-Nuradil/Ride_Hailing-/commit/18c45c0)
 
-The same 11 PricingCalculatorTest cases passed before and after refactoring.
-Their behavior assertions were preserved.
+The same 11 `PricingCalculatorTest` cases passed before and after
+refactoring. Their behavior assertions were preserved.
 
-## Tests
+`PricingCalculator` preserves the original entry point while delegating
+calculation through the strategy-based implementation.
+
+## Unit tests
+
+The Assignment 5 test classes contain 59 test invocations:
+
+| Test class | Test invocations |
+|---|---:|
+| PricingCalculatorTest | 11 |
+| PricingSelectorTest | 10 |
+| PricingContextTest | 5 |
+| TrafficPricingStrategyTest | 9 |
+| DriverMatchingTest | 24 |
+| Total | 59 |
 
 JUnit 5 tests cover:
+
 - Every pricing algorithm.
 - Every matching algorithm.
-- Manual selection modes and invalid modes.
-- Every automatic selector rule and rule priority.
+- Manual selection modes.
+- Missing or unknown manual modes.
+- Every automatic selector rule.
+- Selector rule priority.
 - Pricing selection boundaries at 9 and 10 minutes.
+- Constructor strategy injection.
 - Runtime strategy replacement.
+- Rejection of null replacement strategies.
 - Fixed fake traffic sources.
-- Invalid input and large monetary calculations.
-- Unavailable drivers, empty input and tied scores.
+- Invalid input.
+- Large monetary calculations.
+- Unavailable drivers.
+- Empty candidate lists.
+- Equal-score driver selection.
 
-DriverMatchingTest uses @ParameterizedTest with @MethodSource to execute
-the same contract checks against all three matching strategies.
+`DriverMatchingTest` uses `@ParameterizedTest` with `@MethodSource`
+to execute the same contract checks against all three matching strategies.
 
-The Assignment 5 test classes contain 59 test invocations in total.
+These shared checks verify that every strategy handles empty input,
+excludes unavailable drivers, returns an available input candidate and
+resolves equal scores consistently.
 
 ## Demonstration
 
-StrategyDemo shows:
+`StrategyDemo` shows:
+
 1. The same trip processed by all three pricing strategies.
 2. The same candidates processed by all three matching strategies.
 3. Manual selection compared with automatic selection.
 4. Runtime replacement within the same context object.
 5. Traffic pricing using an injected simulated data source.
 
-Expected pricing results for 20 km and 10 minutes:
-Standard = 4100 KZT; Traffic = 4600 KZT; Airport = 4000 KZT.
-An additional five minutes from the data source produces 4850 KZT.
+### Pricing example
 
-Expected matching results:
-Nearest = D1; Highest-rated = D2; Longest-idle = D3.
-Runtime replacement changes the demonstrated selection from D3 to D2.
+Input: 20 kilometres with 10 minutes of supplied delay.
+
+```text
+StandardPricingStrategy: 4100 KZT
+TrafficPricingStrategy: 4600 KZT
+AirportPricingStrategy: 4000 KZT
+Manual choice: StandardPricingStrategy
+Automatic choice: TrafficPricingStrategy
+Before runtime switch: 4100 KZT
+After runtime switch: 4600 KZT
+With external source (+5 minutes): 4850 KZT
+```
+
+### Driver matching example
+
+The same candidates are supplied to every matching strategy:
+
+| Driver | Pickup distance | Rating | Idle minutes | Available |
+|---|---:|---:|---:|---|
+| D1 | 1 km | 4.2 | 5 | Yes |
+| D2 | 4 km | 4.9 | 10 | Yes |
+| D3 | 3 km | 4.5 | 40 | Yes |
+| D4 | 0 km | 5.0 | 100 | No |
+
+Expected selection:
+
+```text
+NearestDriverStrategy: D1
+HighestRatedDriverStrategy: D2
+LongestIdleDriverStrategy: D3
+Manual choice: LongestIdleDriverStrategy
+Automatic choice: HighestRatedDriverStrategy
+Before runtime switch: D3
+After runtime switch: D2
+```
+
+D4 is excluded because the driver is unavailable.
+
+## Assignment 4 documentation
+
+The previous application documentation is preserved in
+[README_Assignment4.md](README_Assignment4.md).
